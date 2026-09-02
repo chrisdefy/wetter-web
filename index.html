@@ -101,6 +101,23 @@
     button:active { transform: scale(0.96); }
     button:disabled { opacity: 0.5; cursor: default; }
 
+    .wasser-wrap { width: 100%; max-width: 440px; margin-top: 16px; }
+    .wasser {
+      background: linear-gradient(135deg, rgba(46, 165, 210, 0.25), rgba(110, 168, 254, 0.18));
+      border: 1px solid rgba(120, 200, 255, 0.3);
+      border-radius: 22px;
+      padding: 18px 22px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);
+    }
+    .wasser .emoji { font-size: 44px; line-height: 1; }
+    .wasser .info { flex: 1; }
+    .wasser .ort { font-size: 18px; font-weight: 700; }
+    .wasser .sub { font-size: 12px; color: var(--muted); margin-top: 3px; }
+    .wasser .wtemp { font-size: 40px; font-weight: 800; color: #7fd4ff; }
+
     footer { margin-top: 28px; color: var(--muted); font-size: 11px; text-align: center; }
     footer a { color: var(--muted); }
   </style>
@@ -112,6 +129,8 @@
   </header>
 
   <div class="cards" id="cards"></div>
+
+  <div class="wasser-wrap" id="wasser"></div>
 
   <button id="knopf" onclick="ladeAlle()">Aktualisieren</button>
 
@@ -208,7 +227,33 @@
       knopf.disabled = false;
     }
 
+    // Laedt die Wassertemperatur des Schlachtensees aus der lokalen Datei.
+    // Diese Datei wird taeglich von einem Cloud-Job (GitHub Action) aktualisiert.
+    async function ladeWasser() {
+      const el = document.getElementById("wasser");
+      try {
+        // "?t=" verhindert, dass der Browser eine alte Version zwischenspeichert.
+        const antwort = await fetch("wasser.json?t=" + Date.now());
+        if (!antwort.ok) throw new Error();
+        const w = await antwort.json();
+        const datum = new Date(w.stand + "T00:00:00")
+          .toLocaleDateString("de-DE", { day: "numeric", month: "long" });
+        el.innerHTML = `
+          <div class="wasser">
+            <div class="emoji">🏊</div>
+            <div class="info">
+              <div class="ort">${w.ort}</div>
+              <div class="sub">Wassertemperatur · Stand ${datum}</div>
+            </div>
+            <div class="wtemp">${Math.round(w.temperatur)}°</div>
+          </div>`;
+      } catch (e) {
+        el.innerHTML = "";  // Wenn keine Daten da sind, einfach nichts anzeigen.
+      }
+    }
+
     ladeAlle();
+    ladeWasser();
   </script>
 </body>
 </html>
