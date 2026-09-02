@@ -8,6 +8,8 @@ Eine statische Wetter-Webseite (eine einzige `index.html`, kein Build-Schritt), 
 
 Der Nutzer ist Programmier-Einsteiger und kommuniziert auf Deutsch — Erklärungen einfach und schrittweise halten.
 
+**Wo wir stehen:** `memo.md` ist das fortlaufende Sitzungs-Tagebuch. Lies es zu Beginn jeder Sitzung (neueste Einträge oben), um dort weiterzumachen, wo zuletzt aufgehört wurde — und ergänze am Ende der Sitzung einen neuen datierten Eintrag.
+
 ## Häufige Befehle
 
 - **Lokal ansehen:** `python3 -m http.server 8765`, dann http://localhost:8765/ öffnen.
