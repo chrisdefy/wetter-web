@@ -85,6 +85,26 @@
     .detail .wert { font-size: 17px; font-weight: 700; }
     .detail .label { font-size: 11px; color: var(--muted); margin-top: 3px; }
 
+    .vorhersage {
+      display: flex;
+      gap: 6px;
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px solid var(--card-border);
+    }
+    .tag {
+      flex: 1;
+      text-align: center;
+      padding: 8px 2px;
+      border-radius: 12px;
+      background: rgba(0, 0, 0, 0.15);
+    }
+    .tag-name { font-size: 11px; color: var(--muted); font-weight: 600; }
+    .tag-emoji { font-size: 22px; margin: 4px 0; }
+    .tag-temp { font-size: 12px; }
+    .tag-temp b { font-size: 13px; }
+    .tag-regen { font-size: 10px; color: #7fd4ff; margin-top: 3px; }
+
     button {
       margin-top: 26px;
       background: var(--accent);
@@ -176,14 +196,40 @@
       const url = `https://api.open-meteo.com/v1/forecast`
         + `?latitude=${stadt.lat}&longitude=${stadt.lon}`
         + `&current=temperature_2m,relative_humidity_2m,`
-        + `apparent_temperature,weather_code,wind_speed_10m`;
+        + `apparent_temperature,weather_code,wind_speed_10m`
+        + `&daily=weather_code,temperature_2m_max,temperature_2m_min,`
+        + `precipitation_probability_max`
+        + `&forecast_days=5&timezone=auto`;
       const antwort = await fetch(url);
       if (!antwort.ok) throw new Error("Netzwerkfehler");
-      return (await antwort.json()).current;
+      return await antwort.json();   // enthaelt "current" und "daily"
     }
 
-    function zeichne(stadt, w) {
-      const [text, emoji] = CODES[w.weather_code] || ["Unbekannt", "❓"];
+    // Baut die 5-Tage-Leiste aus den Tagesdaten.
+    function zeichneVorhersage(daily) {
+      const tage = daily.time.map((datum, i) => {
+        const d = new Date(datum + "T00:00:00");
+        const name = i === 0
+          ? "Heute"
+          : d.toLocaleDateString("de-DE", { weekday: "short" });
+        const [, emoji] = CODES[daily.weather_code[i]] || ["", "❓"];
+        const max = Math.round(daily.temperature_2m_max[i]);
+        const min = Math.round(daily.temperature_2m_min[i]);
+        const regen = daily.precipitation_probability_max[i] ?? 0;
+        return `
+          <div class="tag">
+            <div class="tag-name">${name}</div>
+            <div class="tag-emoji">${emoji}</div>
+            <div class="tag-temp"><b>${max}°</b> ${min}°</div>
+            <div class="tag-regen">💧 ${regen}%</div>
+          </div>`;
+      }).join("");
+      return `<div class="vorhersage">${tage}</div>`;
+    }
+
+    function zeichne(stadt, d) {
+      const c = d.current;
+      const [text, emoji] = CODES[c.weather_code] || ["Unbekannt", "❓"];
       return `
         <div class="card">
           <div class="top">
@@ -192,22 +238,23 @@
               <div class="stadt">${stadt.name}</div>
               <div class="beschreibung">${text}</div>
             </div>
-            <div class="temp">${Math.round(w.temperature_2m)}°</div>
+            <div class="temp">${Math.round(c.temperature_2m)}°</div>
           </div>
           <div class="details">
             <div class="detail">
-              <div class="wert">${Math.round(w.apparent_temperature)}°</div>
+              <div class="wert">${Math.round(c.apparent_temperature)}°</div>
               <div class="label">Gefühlt</div>
             </div>
             <div class="detail">
-              <div class="wert">${w.relative_humidity_2m}%</div>
+              <div class="wert">${c.relative_humidity_2m}%</div>
               <div class="label">Luftfeuchte</div>
             </div>
             <div class="detail">
-              <div class="wert">${w.wind_speed_10m}</div>
+              <div class="wert">${c.wind_speed_10m}</div>
               <div class="label">km/h Wind</div>
             </div>
           </div>
+          ${zeichneVorhersage(d.daily)}
         </div>`;
     }
 
