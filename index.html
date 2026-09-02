@@ -138,6 +138,12 @@
     .wasser .sub { font-size: 12px; color: var(--muted); margin-top: 3px; }
     .wasser .wtemp { font-size: 40px; font-weight: 800; color: #7fd4ff; }
 
+    .meer {
+      background: linear-gradient(135deg, rgba(20, 180, 160, 0.28), rgba(64, 200, 224, 0.2));
+      border-color: rgba(90, 230, 210, 0.35);
+    }
+    .meer .wtemp { color: #6ff2d6; }
+
     footer { margin-top: 28px; color: var(--muted); font-size: 11px; text-align: center; }
     footer a { color: var(--muted); }
   </style>
@@ -151,8 +157,9 @@
   <div class="cards" id="cards"></div>
 
   <div class="wasser-wrap" id="wasser"></div>
+  <div class="wasser-wrap" id="meer"></div>
 
-  <button id="knopf" onclick="ladeAlle()">Aktualisieren</button>
+  <button id="knopf" onclick="aktualisiereAlles()">Aktualisieren</button>
 
   <footer>
     Daten von <a href="https://open-meteo.com" target="_blank">Open-Meteo</a>
@@ -165,7 +172,11 @@
       { name: "Berlin",  lat: 52.5200, lon: 13.4050 },
       { name: "Schwerin", lat: 53.6294, lon: 11.4132 },
       { name: "Bad Schmiedeberg", lat: 51.6852, lon: 12.7348 },
+      { name: "Alanya (Türkei)", lat: 36.5438, lon: 31.9998 },
     ];
+
+    // Meerwasser-Messpunkt vor Alanya (leicht im Wasser, fuer die Marine-API).
+    const MEER_ALANYA = { name: "Alanya", lat: 36.53, lon: 32.00 };
 
     // Wetter-Codes von Open-Meteo -> [Text, Emoji].
     const CODES = {
@@ -301,8 +312,39 @@
       }
     }
 
-    ladeAlle();
-    ladeWasser();
+    // Laedt die aktuelle Meerwassertemperatur (live von der Open-Meteo Marine-API).
+    async function ladeMeer() {
+      const el = document.getElementById("meer");
+      try {
+        const url = `https://marine-api.open-meteo.com/v1/marine`
+          + `?latitude=${MEER_ALANYA.lat}&longitude=${MEER_ALANYA.lon}`
+          + `&current=sea_surface_temperature`;
+        const antwort = await fetch(url);
+        if (!antwort.ok) throw new Error();
+        const temp = (await antwort.json()).current.sea_surface_temperature;
+        if (temp == null) throw new Error();
+        el.innerHTML = `
+          <div class="wasser meer">
+            <div class="emoji">🌊</div>
+            <div class="info">
+              <div class="ort">${MEER_ALANYA.name} · Mittelmeer</div>
+              <div class="sub">Meerwasser am Strand · live</div>
+            </div>
+            <div class="wtemp">${Math.round(temp)}°</div>
+          </div>`;
+      } catch (e) {
+        el.innerHTML = "";
+      }
+    }
+
+    // Frischt Wetter, Seen und Meer gemeinsam auf.
+    function aktualisiereAlles() {
+      ladeAlle();
+      ladeWasser();
+      ladeMeer();
+    }
+
+    aktualisiereAlles();
   </script>
 </body>
 </html>
