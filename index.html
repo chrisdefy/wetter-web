@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Wetter · Potsdam & Berlin</title>
+
+  <!-- Damit die Seite auf dem iPhone wie eine App zum Home-Bildschirm passt -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Wetter">
+  <meta name="theme-color" content="#1e2233">
+
+  <style>
+    :root {
+      --bg1: #1a1f36;
+      --bg2: #2a2f52;
+      --card: rgba(255, 255, 255, 0.07);
+      --card-border: rgba(255, 255, 255, 0.12);
+      --fg: #ffffff;
+      --muted: #9aa4c2;
+      --accent: #6ea8fe;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      color: var(--fg);
+      background: linear-gradient(160deg, var(--bg1), var(--bg2));
+      min-height: 100vh;
+      padding: max(24px, env(safe-area-inset-top)) 20px 40px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    header { text-align: center; margin-bottom: 6px; }
+    h1 { font-size: 26px; font-weight: 800; letter-spacing: -0.5px; }
+    .status { color: var(--muted); font-size: 13px; margin-top: 6px; min-height: 18px; }
+
+    .cards {
+      width: 100%;
+      max-width: 440px;
+      margin-top: 22px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--card-border);
+      border-radius: 22px;
+      padding: 20px 22px;
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);
+      opacity: 0;
+      transform: translateY(10px);
+      animation: rein 0.5s ease forwards;
+    }
+    .card:nth-child(2) { animation-delay: 0.1s; }
+    @keyframes rein { to { opacity: 1; transform: translateY(0); } }
+
+    .top { display: flex; align-items: center; gap: 16px; }
+    .emoji { font-size: 52px; line-height: 1; }
+    .stadt-info { flex: 1; }
+    .stadt { font-size: 20px; font-weight: 700; }
+    .beschreibung { color: var(--muted); font-size: 14px; margin-top: 2px; }
+    .temp { font-size: 46px; font-weight: 800; color: var(--accent); }
+
+    .details {
+      display: flex;
+      gap: 10px;
+      margin-top: 18px;
+    }
+    .detail {
+      flex: 1;
+      background: rgba(0, 0, 0, 0.18);
+      border-radius: 14px;
+      padding: 10px 8px;
+      text-align: center;
+    }
+    .detail .wert { font-size: 17px; font-weight: 700; }
+    .detail .label { font-size: 11px; color: var(--muted); margin-top: 3px; }
+
+    button {
+      margin-top: 26px;
+      background: var(--accent);
+      color: #10203a;
+      font-size: 15px;
+      font-weight: 700;
+      border: none;
+      border-radius: 14px;
+      padding: 13px 26px;
+      cursor: pointer;
+      transition: transform 0.1s, background 0.2s;
+    }
+    button:hover { background: #8bbcff; }
+    button:active { transform: scale(0.96); }
+    button:disabled { opacity: 0.5; cursor: default; }
+
+    footer { margin-top: 28px; color: var(--muted); font-size: 11px; text-align: center; }
+    footer a { color: var(--muted); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Aktuelles Wetter</h1>
+    <div class="status" id="status">Lade Daten …</div>
+  </header>
+
+  <div class="cards" id="cards"></div>
+
+  <button id="knopf" onclick="ladeAlle()">Aktualisieren</button>
+
+  <footer>
+    Daten von <a href="https://open-meteo.com" target="_blank">Open-Meteo</a>
+  </footer>
+
+  <script>
+    // Die Staedte mit ihren Koordinaten.
+    const STAEDTE = [
+      { name: "Potsdam", lat: 52.3906, lon: 13.0645 },
+      { name: "Berlin",  lat: 52.5200, lon: 13.4050 },
+    ];
+
+    // Wetter-Codes von Open-Meteo -> [Text, Emoji].
+    const CODES = {
+      0:  ["Klar", "☀️"],
+      1:  ["Überwiegend klar", "🌤️"],
+      2:  ["Teilweise bewölkt", "⛅"],
+      3:  ["Bedeckt", "☁️"],
+      45: ["Nebel", "🌫️"],
+      48: ["Reifnebel", "🌫️"],
+      51: ["Leichter Niesel", "🌦️"],
+      53: ["Niesel", "🌦️"],
+      55: ["Starker Niesel", "🌧️"],
+      61: ["Leichter Regen", "🌦️"],
+      63: ["Regen", "🌧️"],
+      65: ["Starker Regen", "🌧️"],
+      71: ["Leichter Schnee", "🌨️"],
+      73: ["Schneefall", "🌨️"],
+      75: ["Starker Schnee", "❄️"],
+      80: ["Leichte Schauer", "🌦️"],
+      81: ["Schauer", "🌧️"],
+      82: ["Starke Schauer", "⛈️"],
+      95: ["Gewitter", "⛈️"],
+    };
+
+    const cardsEl = document.getElementById("cards");
+    const statusEl = document.getElementById("status");
+    const knopf = document.getElementById("knopf");
+
+    async function holeWetter(stadt) {
+      const url = `https://api.open-meteo.com/v1/forecast`
+        + `?latitude=${stadt.lat}&longitude=${stadt.lon}`
+        + `&current=temperature_2m,relative_humidity_2m,`
+        + `apparent_temperature,weather_code,wind_speed_10m`;
+      const antwort = await fetch(url);
+      if (!antwort.ok) throw new Error("Netzwerkfehler");
+      return (await antwort.json()).current;
+    }
+
+    function zeichne(stadt, w) {
+      const [text, emoji] = CODES[w.weather_code] || ["Unbekannt", "❓"];
+      return `
+        <div class="card">
+          <div class="top">
+            <div class="emoji">${emoji}</div>
+            <div class="stadt-info">
+              <div class="stadt">${stadt.name}</div>
+              <div class="beschreibung">${text}</div>
+            </div>
+            <div class="temp">${Math.round(w.temperature_2m)}°</div>
+          </div>
+          <div class="details">
+            <div class="detail">
+              <div class="wert">${Math.round(w.apparent_temperature)}°</div>
+              <div class="label">Gefühlt</div>
+            </div>
+            <div class="detail">
+              <div class="wert">${w.relative_humidity_2m}%</div>
+              <div class="label">Luftfeuchte</div>
+            </div>
+            <div class="detail">
+              <div class="wert">${w.wind_speed_10m}</div>
+              <div class="label">km/h Wind</div>
+            </div>
+          </div>
+        </div>`;
+    }
+
+    async function ladeAlle() {
+      statusEl.textContent = "Lade Daten …";
+      knopf.disabled = true;
+      try {
+        const daten = await Promise.all(STAEDTE.map(holeWetter));
+        cardsEl.innerHTML = STAEDTE.map((s, i) => zeichne(s, daten[i])).join("");
+        const jetzt = new Date().toLocaleTimeString("de-DE",
+          { hour: "2-digit", minute: "2-digit" });
+        statusEl.textContent = `Stand: ${jetzt} Uhr`;
+      } catch (e) {
+        cardsEl.innerHTML = "";
+        statusEl.textContent = "⚠️ Keine Verbindung – bitte Internet prüfen.";
+      }
+      knopf.disabled = false;
+    }
+
+    ladeAlle();
+  </script>
+</body>
+</html>
