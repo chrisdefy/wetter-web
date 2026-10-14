@@ -147,6 +147,7 @@
     .z.weg { position: absolute; left: 0.01em; top: 0.07em; opacity: 0; }
     .grad { font-size: 0.4em; line-height: 1; margin: 0.2em 0 0 0.04em; color: var(--accent); letter-spacing: 0; }
     .zustand { font-size: 21px; font-weight: 600; margin-top: 10px; transition: opacity 0.3s; }
+    .zeile, .spanne { color: rgba(255, 255, 255, 0.92); }
     .zeile, .land, .zustand, .spanne { text-shadow: 0 1px 2px rgba(0, 0, 30, 0.35), 0 2px 14px rgba(0, 0, 30, 0.55); }
     .spanne { color: var(--fg-soft); margin-top: 8px; }
 
@@ -306,14 +307,14 @@
         </div>
 
         <div class="karte" id="seenKarte" hidden>
-          <div class="titel mono">Badeseen</div>
+          <div class="titel mono">Wassertemperatur</div>
           <div id="seen"></div>
         </div>
 
         <footer>
           <button class="knopf" id="knopf" type="button">Aktualisieren</button>
           <div class="status mono" id="status">&nbsp;</div>
-          <div class="quelle">Wetter: <a href="https://open-meteo.com" target="_blank" rel="noopener">Open-Meteo</a> · Seen: wassertemperatur.org, PEGELONLINE</div>
+          <div class="quelle">Wetter: <a href="https://open-meteo.com" target="_blank" rel="noopener">Open-Meteo</a> · Seen: wassertemperatur.org, PEGELONLINE · Meer: Open-Meteo Marine</div>
         </footer>
       </section>
     </div>
@@ -331,6 +332,12 @@
       { name: "Bad Schmiedeberg", land: "Deutschland", lat: 51.6852, lon: 12.7348 },
       { name: "Asunción", land: "Paraguay", lat: -25.2637, lon: -57.5759 },
       { name: "Belgrad", land: "Serbien", lat: 44.7866, lon: 20.4489 },
+      { name: "Tunis", land: "Tunesien", lat: 36.8065, lon: 10.1815 },
+    ];
+
+    // Meerwasser-Messpunkte (muessen im Wasser liegen, sonst liefert die Marine-API nichts).
+    const MEERE = [
+      { ort: "Golf von Tunis", meer: "Mittelmeer", lat: 36.85, lon: 10.40 },
     ];
 
     // Wetter-Codes von Open-Meteo (WMO) -> [Text, Art]. Liste laut open-meteo.com/en/docs.
@@ -672,7 +679,7 @@
 
         // Sonnenscheibe
         float scheibe = 1.0 - smoothstep(0.022, 0.028, sd);
-        col = mix(col, vec3(1.0, 0.97, 0.9), scheibe * sichtbar * (1.0 - uWolke * 0.9));
+        col = mix(col, mix(vec3(1.0, 0.6, 0.32), vec3(1.0, 0.97, 0.9), smoothstep(0.04, 0.3, e)), scheibe * sichtbar * (1.0 - uWolke * 0.9));
 
         // Wolken auf einer Ebene in Perspektive: am Horizont klein und dicht, oben gross
         float yy = max(uv.y - hy, 0.0) + 0.06;
@@ -1291,21 +1298,32 @@
       }).join("");
     }
 
-    // Seewassertemperaturen aus der Datei, die der taegliche Cloud-Job (GitHub Action) schreibt.
+    // Wassertemperaturen: Seen aus der Datei, die der taegliche Cloud-Job (GitHub Action) schreibt,
+    // Meer live von der Open-Meteo Marine-API. Faellt eine Quelle aus, zeigen wir einfach die andere.
+    async function ladeSeen() {
+      // "?t=" verhindert, dass der Browser eine alte Version zwischenspeichert.
+      const antwort = await fetch("wasser.json?t=" + Date.now());
+      if (!antwort.ok) throw new Error();
+      const w = await antwort.json();
+      const datum = new Date(w.stand + "T00:00:00").toLocaleDateString("de-DE", { day: "numeric", month: "long" });
+      return w.seen.map((see) => ({ ort: see.ort, notiz: `See · Stand ${datum}`, temp: see.temperatur }));
+    }
+    async function ladeMeere() {
+      const url = `https://marine-api.open-meteo.com/v1/marine`
+        + `?latitude=${MEERE.map((m) => m.lat).join(",")}&longitude=${MEERE.map((m) => m.lon).join(",")}`
+        + `&current=sea_surface_temperature`;
+      const antwort = await fetch(url);
+      if (!antwort.ok) throw new Error();
+      const j = await antwort.json();
+      return (Array.isArray(j) ? j : [j]).map((d, i) => ({ ort: MEERE[i].ort, notiz: `${MEERE[i].meer} · live`, temp: d.current && d.current.sea_surface_temperature }));
+    }
     async function ladeWasser() {
-      try {
-        // "?t=" verhindert, dass der Browser eine alte Version zwischenspeichert.
-        const antwort = await fetch("wasser.json?t=" + Date.now());
-        if (!antwort.ok) throw new Error();
-        const w = await antwort.json();
-        const datum = new Date(w.stand + "T00:00:00").toLocaleDateString("de-DE", { day: "numeric", month: "long" });
-        const welle = `<svg viewBox="0 0 30 30" aria-hidden="true"><path d="M3 12c3-3 5-3 8 0s5 3 8 0 5-3 8 0M3 19c3-3 5-3 8 0s5 3 8 0 5-3 8 0" fill="none" stroke="#7fd4ff" stroke-width="2" stroke-linecap="round"/></svg>`;
-        $("#seen").innerHTML = w.seen.map((see) => `<div class="see">${welle}<div><div class="sname">${see.ort}</div><div class="snotiz mono">Wasser · Stand ${datum}</div></div>`
-          + `<div class="stemp" style="color:${rgba(tempFarbe(see.temperatur))}">${gradText(see.temperatur)}°</div></div>`).join("");
-        $("#seenKarte").hidden = w.seen.length === 0;
-      } catch (e) {
-        $("#seenKarte").hidden = true;  // Wenn keine Daten da sind, einfach nichts anzeigen.
-      }
+      const [seen, meere] = await Promise.allSettled([ladeSeen(), ladeMeere()]);
+      const zeilen = [...(seen.value || []), ...(meere.value || [])].filter((z) => z.temp != null);
+      const welle = `<svg viewBox="0 0 30 30" aria-hidden="true"><path d="M3 12c3-3 5-3 8 0s5 3 8 0 5-3 8 0M3 19c3-3 5-3 8 0s5 3 8 0 5-3 8 0" fill="none" stroke="#7fd4ff" stroke-width="2" stroke-linecap="round"/></svg>`;
+      $("#seen").innerHTML = zeilen.map((z) => `<div class="see">${welle}<div><div class="sname">${z.ort}</div><div class="snotiz mono">${z.notiz}</div></div>`
+        + `<div class="stemp" style="color:${rgba(tempFarbe(z.temp))}">${gradText(z.temp)}°</div></div>`).join("");
+      $("#seenKarte").hidden = zeilen.length === 0;  // Wenn keine Daten da sind, einfach nichts anzeigen.
     }
 
     function waehleStadt(i, ersterStart) {
