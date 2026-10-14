@@ -306,15 +306,15 @@
           <div id="tage"></div>
         </div>
 
-        <div class="karte" id="seenKarte" hidden>
-          <div class="titel mono">Wassertemperatur</div>
-          <div id="seen"></div>
+        <div class="karte" id="wasserKarte" hidden>
+          <div class="titel mono">Regionale Wassertemperatur</div>
+          <div id="gewaesser"></div>
         </div>
 
         <footer>
           <button class="knopf" id="knopf" type="button">Aktualisieren</button>
           <div class="status mono" id="status">&nbsp;</div>
-          <div class="quelle">Wetter: <a href="https://open-meteo.com" target="_blank" rel="noopener">Open-Meteo</a> · Seen: wassertemperatur.org, PEGELONLINE · Meer: Open-Meteo Marine</div>
+          <div class="quelle">Wetter: <a href="https://open-meteo.com" target="_blank" rel="noopener">Open-Meteo</a> · Gewässer: wassertemperatur.org, PEGELONLINE, RHMZ Serbien · Meer: Open-Meteo Marine</div>
         </footer>
       </section>
     </div>
@@ -324,20 +324,25 @@
   (() => {
     "use strict";
 
+    // Gewaesser fuer die "Regionale Wassertemperatur". Quellen: "pegel" = PEGELONLINE-Messstelle des Bundes
+    // (ganzjaehrig, live), "datei" = wasser.json vom taeglichen Cloud-Job, "meer" = Open-Meteo Marine (live).
+    const HAVEL_POTSDAM = { quelle: "pegel", id: "5e10e1e7-9115-4bd7-ad57-e2062f516891", name: "Havel", ort: "Pegel Potsdam" };
+
     // Die Staedte mit ihren Koordinaten. Die erste wird beim Oeffnen gezeigt.
+    // "wasser": Gewaesser in der Naehe, in Reihenfolge der Wahl (die erste Quelle mit aktuellem Wert gewinnt).
     const STAEDTE = [
-      { name: "Potsdam", land: "Deutschland", lat: 52.3906, lon: 13.0645 },
-      { name: "Berlin", land: "Deutschland", lat: 52.5200, lon: 13.4050 },
-      { name: "Schwerin", land: "Deutschland", lat: 53.6294, lon: 11.4132 },
+      { name: "Potsdam", land: "Deutschland", lat: 52.3906, lon: 13.0645, wasser: [HAVEL_POTSDAM] },
+      { name: "Berlin", land: "Deutschland", lat: 52.5200, lon: 13.4050,
+        wasser: [{ quelle: "datei", see: "Schlachtensee", name: "Schlachtensee", ort: "Berlin-Zehlendorf" }, HAVEL_POTSDAM] },
+      { name: "Schwerin", land: "Deutschland", lat: 53.6294, lon: 11.4132,
+        wasser: [{ quelle: "pegel", id: "680d5966-273f-4254-aabe-5d4e00e12a24", name: "Schweriner See", ort: "Pegel Schwerin" }] },
       { name: "Bad Schmiedeberg", land: "Deutschland", lat: 51.6852, lon: 12.7348 },
       { name: "Asunción", land: "Paraguay", lat: -25.2637, lon: -57.5759 },
-      { name: "Belgrad", land: "Serbien", lat: 44.7866, lon: 20.4489 },
-      { name: "Tunis", land: "Tunesien", lat: 36.8065, lon: 10.1815 },
-    ];
-
-    // Meerwasser-Messpunkte (muessen im Wasser liegen, sonst liefert die Marine-API nichts).
-    const MEERE = [
-      { ort: "Golf von Tunis", meer: "Mittelmeer", lat: 36.85, lon: 10.40 },
+      { name: "Belgrad", land: "Serbien", lat: 44.7866, lon: 20.4489,
+        wasser: [{ quelle: "datei", see: "Save Belgrad", name: "Save", ort: "Pegel Belgrad" }] },
+      // Meer-Punkt muss im Wasser liegen, sonst liefert die Marine-API nichts.
+      { name: "Tunis", land: "Tunesien", lat: 36.8065, lon: 10.1815,
+        wasser: [{ quelle: "meer", lat: 36.85, lon: 10.40, name: "Mittelmeer", ort: "Golf von Tunis" }] },
     ];
 
     // Wetter-Codes von Open-Meteo (WMO) -> [Text, Art]. Liste laut open-meteo.com/en/docs.
@@ -1298,32 +1303,62 @@
       }).join("");
     }
 
-    // Wassertemperaturen: Seen aus der Datei, die der taegliche Cloud-Job (GitHub Action) schreibt,
-    // Meer live von der Open-Meteo Marine-API. Faellt eine Quelle aus, zeigen wir einfach die andere.
-    async function ladeSeen() {
-      // "?t=" verhindert, dass der Browser eine alte Version zwischenspeichert.
-      const antwort = await fetch("wasser.json?t=" + Date.now());
-      if (!antwort.ok) throw new Error();
-      const w = await antwort.json();
-      const datum = new Date(w.stand + "T00:00:00").toLocaleDateString("de-DE", { day: "numeric", month: "long" });
-      return w.seen.map((see) => ({ ort: see.ort, notiz: `See · Stand ${datum}`, temp: see.temperatur }));
-    }
-    async function ladeMeere() {
-      const url = `https://marine-api.open-meteo.com/v1/marine`
-        + `?latitude=${MEERE.map((m) => m.lat).join(",")}&longitude=${MEERE.map((m) => m.lon).join(",")}`
-        + `&current=sea_surface_temperature`;
-      const antwort = await fetch(url);
-      if (!antwort.ok) throw new Error();
+    // Regionale Wassertemperatur je Stadt. Alle Quellen werden einmal geladen; je Stadt zeigen wir
+    // die erste Quelle ihrer Liste, die einen aktuellen Wert hat. Fehlt alles, bleibt die Karte weg.
+    let wasserWerte = new Map();
+    const quellSchluessel = (q) => (q.quelle === "pegel" ? "p:" + q.id : q.quelle === "meer" ? `m:${q.lat},${q.lon}` : "d:" + q.see);
+    const ALT = 2 * TAG;   // aeltere Werte zeigen wir nicht mehr
+
+    async function holeGewaesser(q, datei) {
+      if (q.quelle === "datei") {
+        const w = await datei;
+        const see = w.seen.find((s) => s.ort === q.see);
+        if (!see) return null;
+        const stand = see.datum || w.stand;   // "datum" steht dabei, wenn der Wert nicht von heute ist
+        if (Date.now() - Date.parse(stand + "T12:00:00Z") > ALT + TAG) return null;
+        const datum = new Date(stand + "T00:00:00").toLocaleDateString("de-DE", { day: "numeric", month: "long" });
+        return { temp: see.temperatur, wann: `Stand ${datum}` };
+      }
+      if (q.quelle === "pegel") {
+        const antwort = await fetch(`https://www.pegelonline.wsv.de/webservices/rest-api/v2/stations/${q.id}/WT/currentmeasurement.json`);
+        if (!antwort.ok) return null;
+        const m = await antwort.json();
+        if (m.value == null || Date.now() - Date.parse(m.timestamp) > ALT) return null;
+        const wann = new Date(m.timestamp).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Berlin" });
+        return { temp: m.value, wann: `${wann} Uhr` };
+      }
+      const antwort = await fetch(`https://marine-api.open-meteo.com/v1/marine?latitude=${q.lat}&longitude=${q.lon}&current=sea_surface_temperature`);
+      if (!antwort.ok) return null;
       const j = await antwort.json();
-      return (Array.isArray(j) ? j : [j]).map((d, i) => ({ ort: MEERE[i].ort, notiz: `${MEERE[i].meer} · live`, temp: d.current && d.current.sea_surface_temperature }));
+      return j.current && j.current.sea_surface_temperature != null ? { temp: j.current.sea_surface_temperature, wann: "live" } : null;
     }
+
     async function ladeWasser() {
-      const [seen, meere] = await Promise.allSettled([ladeSeen(), ladeMeere()]);
-      const zeilen = [...(seen.value || []), ...(meere.value || [])].filter((z) => z.temp != null);
-      const welle = `<svg viewBox="0 0 30 30" aria-hidden="true"><path d="M3 12c3-3 5-3 8 0s5 3 8 0 5-3 8 0M3 19c3-3 5-3 8 0s5 3 8 0 5-3 8 0" fill="none" stroke="#7fd4ff" stroke-width="2" stroke-linecap="round"/></svg>`;
-      $("#seen").innerHTML = zeilen.map((z) => `<div class="see">${welle}<div><div class="sname">${z.ort}</div><div class="snotiz mono">${z.notiz}</div></div>`
-        + `<div class="stemp" style="color:${rgba(tempFarbe(z.temp))}">${gradText(z.temp)}°</div></div>`).join("");
-      $("#seenKarte").hidden = zeilen.length === 0;  // Wenn keine Daten da sind, einfach nichts anzeigen.
+      // "?t=" verhindert, dass der Browser eine alte Version zwischenspeichert.
+      const datei = fetch("wasser.json?t=" + Date.now()).then((r) => { if (!r.ok) throw new Error(); return r.json(); });
+      datei.catch(() => {});
+      const quellen = new Map();
+      for (const s of STAEDTE) for (const q of s.wasser || []) quellen.set(quellSchluessel(q), q);
+      const werte = new Map();
+      await Promise.all([...quellen].map(async ([k, q]) => {
+        try { const w = await holeGewaesser(q, datei); if (w) werte.set(k, w); } catch (e) { /* Quelle faellt aus: naechste nehmen */ }
+      }));
+      wasserWerte = werte;
+      zeigeWasser();
+    }
+
+    function zeigeWasser() {
+      const karte = $("#wasserKarte");
+      for (const q of STAEDTE[aktiv].wasser || []) {
+        const w = wasserWerte.get(quellSchluessel(q));
+        if (!w) continue;
+        const welle = `<svg viewBox="0 0 30 30" aria-hidden="true"><path d="M3 12c3-3 5-3 8 0s5 3 8 0 5-3 8 0M3 19c3-3 5-3 8 0s5 3 8 0 5-3 8 0" fill="none" stroke="#7fd4ff" stroke-width="2" stroke-linecap="round"/></svg>`;
+        $("#gewaesser").innerHTML = `<div class="see">${welle}<div><div class="sname">${q.name}</div><div class="snotiz mono">${q.ort} · ${w.wann}</div></div>`
+          + `<div class="stemp" style="color:${rgba(tempFarbe(w.temp))}">${gradText(w.temp)}°</div></div>`;
+        karte.hidden = false;
+        return;
+      }
+      karte.hidden = true;  // Kein Gewaesser in der Naehe oder keine Daten: Karte weglassen.
     }
 
     function waehleStadt(i, ersterStart) {
@@ -1338,6 +1373,7 @@
       const tempAlt = cache.temp, vAlt = cache.v;
       cache = { temp: tempAlt, v: vAlt };
       zeigeTage();
+      zeigeWasser();
       kurveNeu = true;
       if (!daten[aktiv] && !ersterStart) { setzeZahl(ziffernEl, "–", true); cache.temp = "–"; zustandEl.textContent = "Keine Daten"; }
     }
