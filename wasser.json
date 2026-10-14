@@ -1,9 +1,13 @@
 {
-  "stand": "2026-10-13",
+  "stand": "2026-10-14",
   "seen": [
     {
       "ort": "Schlachtensee",
       "temperatur": 17.0
+    },
+    {
+      "ort": "Schweriner See",
+      "temperatur": 13.8
     }
   ]
 }

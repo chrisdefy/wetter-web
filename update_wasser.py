@@ -3,7 +3,8 @@
 Holt die aktuellen Wassertemperaturen mehrerer Seen und schreibt sie
 in die Datei 'wasser.json'. Wird taeglich vom GitHub-Action-Cloud-Job aufgerufen.
 
-Quelle: wassertemperatur.org (basiert auf offiziellen Messungen).
+Quellen: wassertemperatur.org (basiert auf offiziellen Messungen) und
+PEGELONLINE (Messstellen des Bundes, messen ganzjaehrig).
 """
 
 import json
@@ -12,12 +13,15 @@ import sys
 import urllib.request
 from datetime import date
 
-# Die Seen mit ihrer Quelle. "ort" muss dem Namen im Seitentext entsprechen.
+# Die Seen mit ihrer Quelle. Entweder "url" (wassertemperatur.org, dann muss
+# "ort" dem Namen im Seitentext entsprechen) oder "pegel" (PEGELONLINE-Messstelle).
 SEEN = [
     {"ort": "Schlachtensee",
      "url": "https://www.wassertemperatur.org/berlin/schlachtensee/"},
+    # wassertemperatur.org zeigt den Schweriner See nur in der Badesaison,
+    # deshalb die ganzjaehrige Messstelle "Schwerin Werderbruecke".
     {"ort": "Schweriner See",
-     "url": "https://www.wassertemperatur.org/schweriner-see/"},
+     "pegel": "680d5966-273f-4254-aabe-5d4e00e12a24"},
 ]
 
 
@@ -37,12 +41,23 @@ def hole_temperatur(ort, url):
     return float(treffer.group(1).replace(",", "."))
 
 
+def hole_pegel_temperatur(pegel):
+    url = ("https://www.pegelonline.wsv.de/webservices/rest-api/v2/stations/"
+           + pegel + "/WT/currentmeasurement.json")
+    with urllib.request.urlopen(url, timeout=15) as antwort:
+        messung = json.load(antwort)   # z.B. {"timestamp": "...", "value": 13.8}
+    return float(messung["value"])
+
+
 def main():
     seen = []
     fehler = []
     for eintrag in SEEN:
         try:
-            temp = hole_temperatur(eintrag["ort"], eintrag["url"])
+            if "pegel" in eintrag:
+                temp = hole_pegel_temperatur(eintrag["pegel"])
+            else:
+                temp = hole_temperatur(eintrag["ort"], eintrag["url"])
             seen.append({"ort": eintrag["ort"], "temperatur": temp})
         except Exception as e:
             fehler.append(f"{eintrag['ort']}: {e}")
