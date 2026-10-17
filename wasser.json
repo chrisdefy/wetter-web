@@ -1,5 +1,5 @@
 {
-  "stand": "2026-10-16",
+  "stand": "2026-10-17",
   "seen": [
     {
       "ort": "Schlachtensee",
@@ -7,12 +7,12 @@
     },
     {
       "ort": "Schweriner See",
-      "temperatur": 13.8
+      "temperatur": 13.6
     },
     {
       "ort": "Save Belgrad",
-      "temperatur": 17.2,
-      "datum": "2026-10-16"
+      "temperatur": 16.9,
+      "datum": "2026-10-17"
     }
   ]
 }
